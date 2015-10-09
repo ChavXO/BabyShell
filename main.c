@@ -119,6 +119,7 @@ int run_shell(path* head) {
 
     			if (params[0] != NULL) {
                     if (!isBuiltInCommand(params[0])) {
+                        shell_printed = false;
                         pid_t pid = fork();
 	            		if (pid == 0) {
 	            		    if (params[0][0] != '/') {
