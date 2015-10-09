@@ -15,9 +15,10 @@
 
 /* known issues
  * prompt prints twice over in parallel mode sometimes
+ * chain of bogus commands fills process list *** fixed
  * crtl + d combination does not show an error message for exit while tasks are running
  * does not run files in the current path using my other implementation of path
- * invlaid write of size 4 when resuming job *** fixed
+ * invalid write of size 4 when resuming job *** fixed
  */
 
 // shell constants
@@ -54,7 +55,6 @@ typedef struct _processes {
 } processes;
 
 processes* head_jobs;
-processes* current_job;
 
 int run_shell(path* head);
 int _inc_jobs(int n);
@@ -68,8 +68,8 @@ void free_path(path* head);
 
 char** tokenify(char* buffer, char* split);
 char** splitCommands(char* buffer);
-void removeComments(char* buffer);
-bool isBuiltInCommand(char* command);
+void remove_comments(char* buffer);
+bool is_built_in_command(char* command);
 void run_builtin(char** params, char* buffer);
 void execute_path_command(char** params, path* head, char* buffer);
 
@@ -90,7 +90,7 @@ void delete_process_by_name(char* process_name);
 int main() {
     // removed ampersand because the behaviour was inconsistent
     system("reset"); //run reset in parallel to reduce lag time
-    //signal(SIGCHLD, sig_comm);
+    //signal(SIGCHLD, sig_comm); //moved down so that signal is only set in parallel. No need to define it in sequential
     printf("%c]0;%s%c", '\033', "Shelby the Shell", '\007'); // window title
     //path* head = load_environment();
     path* head = load_path("shell-config");
@@ -104,23 +104,22 @@ int run_shell(path* head) {
     head_jobs = (processes*) calloc(1, sizeof(processes));
     head_jobs->next = NULL;
     head_jobs->previous = NULL;
-    current_job = head_jobs;
     show_prompt();
     signal(SIGCHLD, sig_comm);
 	while(!feof(stdin) || _inc_jobs(0) != 0) {
 		char buffer [1024];
 		shell_printed = false;
 		if (fgets(buffer, 1024, stdin) != NULL) {
-		    removeComments(buffer);
+		    remove_comments(buffer);
 			char** commands = splitCommands(buffer);
             int i;
 
 			for (i = 0; commands[i] != NULL; i++) {
 			    char** params = tokenify(commands[i], whitespace);
-			    removeComments(commands[i]);
+			    remove_comments(commands[i]);
 
     			if (params[0] != NULL) {
-                    if (!isBuiltInCommand(params[0])) {
+                    if (!is_built_in_command(params[0])) {
                         pid_t pid = fork();
 	            		if (pid == 0) {
 	            		    shell_printed = false;
@@ -161,6 +160,10 @@ int run_shell(path* head) {
 	        break; //check background
 	    }
 	  
+	    if (feof(stdin)) { 
+	        printf("\nYou cannot exit while there are processes running.\n");
+	    }
+	   
 	    //change mode
 	    if (in_parallel) {
 	        mode = PARALLEL;
@@ -175,6 +178,8 @@ int run_shell(path* head) {
         } else {
             show_prompt();
         }
+        
+        
 	}
 	free(head_jobs);
     return 0;
@@ -225,7 +230,7 @@ char** splitCommands(char* buffer) {
     return tokenify(buffer, ";");
 }
 
-void removeComments(char* buffer) {
+void remove_comments(char* buffer) {
     int i;
     for (i=0; i<strlen(buffer); i++){
         if (buffer[i] == '#' || buffer[i] == '\n') {
@@ -298,7 +303,7 @@ void change_directory(char* dir) {
     }
 }
 
-bool isBuiltInCommand(char* command) {
+bool is_built_in_command(char* command) {
     char* builtin [] = {"exit", "pwd", "cd", "mode", "echo", "type", "resume", "pause", "jobs", "help", NULL};
     int i;
     for (i = 0; builtin[i] != NULL; i++) {
@@ -428,6 +433,8 @@ void execute_path_command(char** params, path* head, char* buffer) {
 
     while (temp != NULL) {        
 	    struct stat statresult;
+	    
+	    // add string to each path
         char comm[1024]= "";
         int stat_res = 0;    
         strcat(comm, temp->path_var);
@@ -611,30 +618,26 @@ void delete_process(pid_t process_id) {
 void delete_process_by_name(char* process_name) {
     if (head_jobs == NULL) {
         return; //case when head is empty
-     }
-   
+    }
     processes* current = head_jobs;
-    while (current != NULL) {
-        if (strcmp(current->prc_name, process_name) == 0) {
-            processes* tmp =  current;
-            processes* prev = current->previous;
-            processes* nxt = current->next;
-            
-            if (current->previous != NULL)
-                current->previous->next = nxt;
-            
-            if (current->next != NULL)
-                current->next->previous = prev;
-            current = prev;
-            free(tmp);
-            _inc_jobs(-1);
-        }
-        
-        if (current != NULL)
-            current = current->next;
-    } 
-    free(current);
+    while (current->next != NULL && strcmp((current->next)->prc_name, process_name) != 0) {
+        current = current->next;
+    }
+    
+    if (current->next == NULL) {
+        return;
+    }
+    
+    processes* tmp = current->next;
+    if (tmp->next == NULL) {
+        current->next = NULL;   
+    } else {
+        current->next = tmp->next;
+        (current->next)->previous = tmp->previous;
+    }
+    tmp->previous = current;
     _inc_jobs(-1);
+    free(tmp);
     return;
 }
 
