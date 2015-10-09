@@ -14,10 +14,10 @@
 #include <signal.h>
 
 /* known issues
- * prompt prints twice over in parallel mode sometimes
+ * prompt prints twice over in parallel mode sometimes *** it was for some built in commands because they returned. *** fixed
  * chain of bogus commands fills process list *** fixed
- * crtl + d combination does not show an error message for exit while tasks are running
- * does not run files in the current path using my other implementation of path
+ * crtl + d combination does not show an error message for exit while tasks are running *** fixed
+ * does not run files in the current path using my other implementation of path 
  * invalid write of size 4 when resuming job *** fixed
  */
 
@@ -31,7 +31,7 @@ bool in_parallel = false;
 int mode = SEQUENTIAL;
 bool shell_printed = false;
 
-// doubly linked list for keeping track of history
+// plan to implement bangs
 typedef struct _history {
     struct _history *previous;
     char command [1024];
@@ -43,7 +43,7 @@ typedef struct _path {
     struct _path *next;
 } path;
 
-//linked list for processes
+// doubly linked list for keeping track of history
 typedef enum {RUNNING, PAUSED, DEAD} state;
 
 typedef struct _processes {
@@ -361,10 +361,12 @@ bool change_mode(char* mode_str) {
     } else {
         printf("Unrecognised mode: %s.\nValid entires are parallel or p, or sequential or s.\n", mode_str);
     }
+    // default case is to return the current mode
     return in_parallel;
 }
 
 void sig_comm() {
+    // did some work in sig_comm. The while loops approach was a bit tricky
     int status;
     pid_t pid = waitpid(-1, &status, WNOHANG);
     if (pid < 0 && errno != ECHILD)
@@ -660,6 +662,7 @@ void print_processes(processes* head) {
     return;
 }
 
+// function with static variable that keeps track of the number of jobs
 int _inc_jobs(int n){
     static int total_jobs = 0;
     total_jobs += n;
