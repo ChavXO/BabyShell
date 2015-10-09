@@ -94,6 +94,7 @@ int main() {
     path* head = load_environment();
     //path* head = load_path("shell-config");
     int res = run_shell(head);	
+    free_path(head);
 	return res;
 }
 
@@ -105,7 +106,7 @@ int run_shell(path* head) {
     current_job = head_jobs;
     show_prompt();
     signal(SIGCHLD, sig_comm);
-	while(!feof(stdin)) {
+	while(!feof(stdin) || _inc_jobs(0) != 0) {
 		char buffer [1024];
 		shell_printed = false;
 		if (fgets(buffer, 1024, stdin) != NULL) {
@@ -119,7 +120,6 @@ int run_shell(path* head) {
 
     			if (params[0] != NULL) {
                     if (!isBuiltInCommand(params[0])) {
-                        shell_printed = false;
                         pid_t pid = fork();
 	            		if (pid == 0) {
 	            		    if (params[0][0] != '/') {
@@ -154,7 +154,7 @@ int run_shell(path* head) {
 	    }	    
 
 	    if (do_exit){
-    	    free_path(head);
+    	    
 	        break; //check background
 	    }
 	  
