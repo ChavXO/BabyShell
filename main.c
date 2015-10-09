@@ -13,11 +13,12 @@
 #include <errno.h>
 #include <signal.h>
 
-//known bugs invlaid writes on strcpy execute path
-//not all processes are deleted
-//jobs is trippy
-// unknown commands in parallel mode
-//refuses to exit after running unknown command
+/* known issues
+ * prompt prints twice over in parallel mode sometimes
+ * crtl + d combination does not show an error message for exit while tasks are running
+ * does not run files in the current path using my other implementation of path
+ * invlaid write of size 4 when resuming job *** fixed
+ */
 
 // shell constants
 static const int SEQUENTIAL = 0;
@@ -91,8 +92,8 @@ int main() {
     system("reset"); //run reset in parallel to reduce lag time
     //signal(SIGCHLD, sig_comm);
     printf("%c]0;%s%c", '\033', "Shelby the Shell", '\007'); // window title
-    path* head = load_environment();
-    //path* head = load_path("shell-config");
+    //path* head = load_environment();
+    path* head = load_path("shell-config");
     int res = run_shell(head);	
     free_path(head);
 	return res;
@@ -122,6 +123,7 @@ int run_shell(path* head) {
                     if (!isBuiltInCommand(params[0])) {
                         pid_t pid = fork();
 	            		if (pid == 0) {
+	            		    shell_printed = false;
 	            		    if (params[0][0] != '/') {
             		            execute_path_command(params, head, buffer);
             		        } else {
@@ -142,6 +144,7 @@ int run_shell(path* head) {
         	        		}	
 	            		}
                     } else { //handle builtin commands
+                        shell_printed = false;
         	    		run_builtin(params, buffer);
 	            	}
 	            }
@@ -479,8 +482,16 @@ void run_builtin(char** params, char* buffer) {
         if (mode == SEQUENTIAL)
             system(buffer);
         else {
-            //strcat(params[0], " &");
-            system(buffer);
+            //might need to pass in commands for this to be fully functional
+            char* tmp = calloc((strlen(params[0]) + strlen(params[1]) + 5), sizeof(char));
+            strcat(tmp, params[0]);
+            strcat(tmp, " ");
+            strcat(tmp, params[1]);
+            strcat(tmp, " &");
+            system(tmp);
+            free(tmp);
+            shell_printed = false;
+            //show_prompt(); //built_in commands don't return in signal
         }
     }
     return;
