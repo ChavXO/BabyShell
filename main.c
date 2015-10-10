@@ -23,6 +23,11 @@
  * sequence of invalid command causes memory leaks in address space of program in parallel execution behaviour is inconsistent *** fixed
  * some inconsistent behaviour when swiching between modes ** fixed by making state a variable that is passed between functions
  */
+ 
+ /* features to implement
+  * access command history through bangs
+  * free memory on abort
+  */
 
 // shell constants
 static const int SEQUENTIAL = 0;
