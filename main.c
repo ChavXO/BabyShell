@@ -11,6 +11,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <errno.h>
+#include <dirent.h>
 #include <signal.h>
 
 /* known issues
@@ -73,6 +74,7 @@ int _inc_jobs(int n);
 void show_prompt();
 void poll_results();
 void sig_comm();
+pid_t proc_find(char* name);
 path* load_environment(); //sets envronment from computer's $PATH variable
 path* load_path_from_list(char** environment); //helper function for load_environment
 path *load_path(const char *filename); //load path from file
@@ -92,11 +94,13 @@ char* previous_directory(char* dir);
 void change_directory(char* dir);
 bool change_mode(char* mode_str);
 void print_processes(processes* head);
+void manage_state();
 void set_process_state(pid_t pid, const char* set_state);
 
 // clean up and debugging
 void print_path(path* head, int num_words); //debugging
 void list_clear(path *list);
+void clean_up_processes();
 path* list_append(char* curr, path *list);
 void free_tokens(char** tokens);
 void add_process(pid_t pid, char* process_name);
@@ -133,20 +137,38 @@ int run_shell(path* head) {
 
 	    if (do_exit) break; //check background
 	  
-	    if (feof(stdin)) printf("\nYou cannot exit while there are processes running.\n"); //unindented single line iff statements help make the code readable for me
-	   
-	    //change mode
-	    if (in_parallel) mode = PARALLEL;
-	    else mode = SEQUENTIAL; 
-	    
-	    if (mode == PARALLEL) {
-	        poll_results(); //using this as a non-blocking wait
-            if (shell_printed == false) show_prompt();
-        	shell_printed = true;
-        } else show_prompt();
+	    if (feof(stdin)) printf("\nYou cannot exit while there are processes running.\n"); //unindented single line iff statements help make the code readable for me	   
+	    manage_state();   
+	    if (_inc_jobs(0) > 0) clean_up_processes(); //in case some process' exit signal wasn't handled
 	}
 	free(head_jobs);
     return 0;
+}
+
+void manage_state() {
+    //change mode
+    if (in_parallel) mode = PARALLEL;
+    else mode = SEQUENTIAL; 
+    
+    if (mode == PARALLEL) {
+        poll_results(); //using this as a non-blocking wait
+        if (shell_printed == false) show_prompt();
+    	shell_printed = true;
+    } else show_prompt();
+}
+
+void clean_up_processes() {
+    processes* current = head_jobs;
+    while (current != NULL) {
+        pid_t pid = proc_find(current->prc_name);
+        if (pid == -1) {
+            processes* tmp = current->next;
+            delete_process_by_name(current->prc_name);
+            current = tmp;
+            continue;
+        }
+        current = current->next;
+    }
 }
 
 void run_commands(char* buffer, char** commands, path* head) {
@@ -398,6 +420,44 @@ bool change_mode(char* mode_str) {
     return in_parallel;
 }
 
+pid_t proc_find(char* name) {
+    DIR* dir;
+    struct dirent* ent;
+    char* endptr;
+    char buf[512];
+    if (!(dir = opendir("/proc"))) {
+        perror("can't open /proc");
+        return -1;
+    }
+
+    while((ent = readdir(dir)) != NULL) {
+        /* if endptr is not a null character, the directory is not
+         * entirely numeric, so ignore it */
+        long lpid = strtol(ent->d_name, &endptr, 10);
+        if (*endptr != '\0') {
+            continue;
+        }
+        /* try to open the cmdline file */
+        snprintf(buf, sizeof(buf), "/proc/%ld/cmdline", lpid);
+        FILE* fp = fopen(buf, "r");
+        if (fp) {
+            if (fgets(buf, sizeof(buf), fp) != NULL) {
+                /* check the first token in the file, the program name */
+                char* first = strtok(buf, " ");
+                if (!strcmp(first, name)) {
+                    fclose(fp);
+                    closedir(dir);
+                    return (pid_t)lpid;
+                }
+            }
+            fclose(fp);
+        }
+
+    }
+    closedir(dir);
+    return -1;
+}
+
 void sig_comm() {
     // did some work in sig_comm. The while loops approach was a bit tricky
     int status;
@@ -496,14 +556,11 @@ void run_builtin(char** params, char* buffer) {
                 set_process_state(pid, "paused");
         }
     } else if (strcmp(params[0], "exit") == 0) {
-            if (_inc_jobs(0) > 0) {
-                printf("You cannot exit while there are processes running.\n");
-            }
-            else
-                do_exit = true;
-        //}
-    } else if (strcmp(params[0], "jobs") == 0) {
-        
+        if (_inc_jobs(0) > 0) {
+            printf("You cannot exit while there are processes running.\n");
+        }
+        else
+            do_exit = true;
     } else {
         if (mode == SEQUENTIAL)
             system(buffer);
@@ -535,7 +592,7 @@ void run_builtin(char** params, char* buffer) {
 
 void poll_results() {
     struct pollfd pfd[1];
-    pfd[0].fd = 0; // stdin is file descriptor 0
+    pfd[0].fd = 0; 
     pfd[0].events = POLLIN;
     pfd[0].revents = 0;
     
