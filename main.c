@@ -19,7 +19,7 @@
  * crtl + d combination does not show an error message for exit while tasks are running *** fixed
  * does not run files in the current path using my other implementation of path 
  * invalid write of size 4 when resuming job *** fixed
- * sequence of invalid command causes memory leaks in address space of program in parallel execution behaviour is inconsistent
+ * sequence of invalid command causes memory leaks in address space of program in parallel execution behaviour is inconsistent *** fixed
  */
 
 // shell constants
@@ -127,7 +127,7 @@ int run_shell(path* head) {
     			        char* command = is_valid_command(params[0], head);
     			        if (command == NULL) {
     			            printf("Invalid command: %s\n", params[0]);
-    			            goto NEXT;
+    			            goto NEXT; // rather than enclosing everything into a big else statement
     			        }
     			        params[0] = realloc(params[0], (strlen(command) + 1) * sizeof(char));
     			        strcpy(params[0], command);
