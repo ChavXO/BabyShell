@@ -18,7 +18,7 @@
  * chain of bogus commands fills process list *** fixed
  * crtl + d combination does not show an error message for exit while tasks are running *** fixed
  * does not run files in the current path using my other implementation of path 
- * invalid write of size 4 when resuming job *** fixed
+ * invalid write of size 4 when resuming job *** fixed (changed current from a processes* to pr
  */
 
 // shell constants
@@ -128,7 +128,7 @@ int run_shell(path* head) {
             		        } else {
             		            execv(params[0], params);
             		        }
-            		        delete_process_by_name(commands[0]);
+            		        delete_process_by_name(commands[0]); // for shell commands and invalid commands 
             		        printf("Command %s not found.\n", params[0]);
             		        do_exit = true;
             		        
@@ -139,6 +139,7 @@ int run_shell(path* head) {
 	            		    if (mode == SEQUENTIAL) {
         	        			waitpid(0, NULL, 0);
         	        		} else {
+        	        		    shell_printed = false; //making sure that the program knows that the shell has not been printed
         	        		    add_process(pid, commands[i]);
         	        		}	
 	            		}
@@ -171,6 +172,7 @@ int run_shell(path* head) {
 	        mode = SEQUENTIAL;
 	    } 
 	    if (mode == PARALLEL) {
+	        poll_results(); //using this as a non-blocking wait
             if (shell_printed == false) {
         	    show_prompt();
         	}
@@ -373,9 +375,9 @@ void sig_comm() {
         printf("Waitpid failed\n"); 
     else if (pid > 0) {
         printf("\nProcess %d finished running.\n", pid);
+        shell_printed = true;
         show_prompt();
         delete_process(pid);
-        shell_printed = true;
     }
 }
 
@@ -492,10 +494,19 @@ void run_builtin(char** params, char* buffer) {
             system(buffer);
         else {
             //might need to pass in commands for this to be fully functional
-            char* tmp = calloc((strlen(params[0]) + strlen(params[1]) + 5), sizeof(char));
+            int comm = 0;
+            int arguments = 0;
+            if (params[0] != NULL) {
+                comm = strlen(params[0]);
+            }
+            if (params[1] != NULL) {
+                arguments = strlen(params[1]);
+            }
+            char* tmp = calloc(comm + arguments + 5, sizeof(char));
             strcat(tmp, params[0]);
             strcat(tmp, " ");
-            strcat(tmp, params[1]);
+            if (arguments > 0)
+                strcat(tmp, params[1]);
             strcat(tmp, " &");
             system(tmp);
             free(tmp);
@@ -563,15 +574,16 @@ void set_process_state (pid_t pid, const char* set_state) {
         printf("Process not found.\n");
         return;
     }
-
+    
+    processes** tmp = &current;
     if (strcmp(set_state, "paused") == 0) {
         printf("Job paused.\n");
-        current->process_state = PAUSED;
+        (*tmp)->process_state = PAUSED;
     }
         
     if (strcmp(set_state, "running") == 0) {
         printf("Job resumed.\n");
-        current->process_state = RUNNING;
+        (*tmp)->process_state = RUNNING;
     }
     return;
 }
