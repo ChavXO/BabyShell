@@ -18,7 +18,7 @@
  * chain of bogus commands fills process list *** fixed
  * crtl + d combination does not show an error message for exit while tasks are running *** fixed
  * does not run files in the current path using my other implementation of path 
- * invalid write of size 4 when resuming job *** fixed (changed current from a processes* to pr
+ * invalid write of size 4 when resuming job *** fixed
  * sequence of invalid command causes memory leaks in address space of program in parallel execution behaviour is inconsistent
  */
 
@@ -69,10 +69,10 @@ void free_path(path* head);
 
 char** tokenify(char* buffer, char* split);
 char** splitCommands(char* buffer);
+char* is_valid_command(char* command, path* head);
 void remove_comments(char* buffer);
 bool is_built_in_command(char* command);
 void run_builtin(char** params, char* buffer);
-void execute_path_command(char** params, path* head, char* buffer);
 
 char* previous_directory(char* dir);
 void change_directory(char* dir);
@@ -120,17 +120,24 @@ int run_shell(path* head) {
 			    remove_comments(commands[i]);
                 bool abort = false;
     			if (params[0] != NULL) {
-                    if (!is_built_in_command(params[0])) {
+    			    if (is_built_in_command(params[0])) { //handle builtin commands
+                        shell_printed = false;
+        	    		run_builtin(params, buffer);
+	            	} else {
+    			        char* command = is_valid_command(params[0], head);
+    			        if (command == NULL) {
+    			            printf("Invalid command: %s\n", params[0]);
+    			            goto NEXT;
+    			        }
+    			        params[0] = realloc(params[0], (strlen(command) + 1) * sizeof(char));
+    			        strcpy(params[0], command);
+    			        free(command);
                         pid_t pid = fork();
 	            		if (pid == 0) {
 	            		    shell_printed = false;
-	            		    if (params[0][0] != '/') {
-            		            execute_path_command(params, head, buffer);
-            		        } else {
-            		            execv(params[0], params);
-            		        }
-            		        delete_process_by_name(commands[i]); // for shell commands and invalid commands 
-            		        printf("Command %s not found.\n", params[0]);
+            		        execv(params[0], params);
+            		        delete_process_by_name(commands[i]); // delete from list by name since there is not pid associated with the process
+            		        printf("Command %s failed to run.\n", params[0]); 
             		        abort = true;
             		        do_exit = true;
             		        
@@ -145,13 +152,10 @@ int run_shell(path* head) {
         	        		    add_process(pid, commands[i]);
         	        		}	
 	            		}
-                    } else { //handle builtin commands
-                        shell_printed = false;
-        	    		run_builtin(params, buffer);
-	            	}
+                    } 
 	            }
 	            
-	    		free_tokens(params);
+	    		NEXT:free_tokens(params);
 	    		if (abort) break;
 	    	}
 	    	free_tokens(commands); 
@@ -233,6 +237,29 @@ char** tokenify(char* buffer, char* split) {
 
 char** splitCommands(char* buffer) {
     return tokenify(buffer, ";");
+}
+
+char* is_valid_command(char* command, path* head) {
+    path* temp = head;
+    
+    while (temp != NULL) {        
+        // duplicate code for this and execute. might just return the string
+	    struct stat statresult;
+	    // add string to each path
+        char comm[1024]= "";
+        int stat_res = 0;    
+        strcat(comm, temp->path_var);
+        strcat(comm, "/");
+        strcat(comm, command);
+        stat_res = stat(comm, &statresult);
+        if (stat_res == 0) {
+            char* ret = calloc(strlen(comm) + 1, sizeof(char));
+            strcpy(ret, comm);
+            return ret;
+        }        		        
+        temp = temp->next;
+    }
+    return NULL;
 }
 
 void remove_comments(char* buffer) {
@@ -435,30 +462,6 @@ void free_path(path* head) {
     }
 }
 
-void execute_path_command(char** params, path* head, char* buffer) {
-    path* temp = head;
-
-    while (temp != NULL) {        
-	    struct stat statresult;
-	    
-	    // add string to each path
-        char comm[1024]= "";
-        int stat_res = 0;    
-        strcat(comm, temp->path_var);
-        strcat(comm, "/");
-        strcat(comm, params[0]);
-        stat_res = stat(comm, &statresult);
-        if (stat_res == 0) {
-            free(params[0]);
-            params[0] = calloc(strlen(comm) + 1, sizeof(char));
-            strcpy(params[0], comm);
-            execv(params[0], params);
-        }        		        
-        temp = temp->next;
-    }
-    return;
-}
-
 void run_builtin(char** params, char* buffer) {
     //multiple arguments vs global variables
     if (strcmp(params[0], "cd") == 0) {
@@ -506,6 +509,7 @@ void run_builtin(char** params, char* buffer) {
                 arguments = strlen(params[1]);
             }
             char* tmp = calloc(comm + arguments + 5, sizeof(char));
+            // add ampersand to make parallel
             strcat(tmp, params[0]);
             strcat(tmp, " ");
             if (arguments > 0)
