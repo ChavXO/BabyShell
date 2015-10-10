@@ -27,6 +27,13 @@ static const int SEQUENTIAL = 0;
 static const int PARALLEL   = 1;
 
 // shell state as global variables (there was too much state specific information to pass around)
+typedef struct _prog_state {
+    bool do_exit;
+    bool in_parallel;
+    int mode;
+    bool shell_printed;    
+} program_state;
+
 bool do_exit = false;
 bool in_parallel = false;
 int mode = SEQUENTIAL;
@@ -119,41 +126,40 @@ int run_shell(path* head) {
 			    char** params = tokenify(commands[i], whitespace);
 			    remove_comments(commands[i]);
                 bool abort = false;
-    			if (params[0] != NULL) {
-    			    if (is_built_in_command(params[0])) { //handle builtin commands
-                        shell_printed = false;
-        	    		run_builtin(params, buffer);
-	            	} else {
-    			        char* command = is_valid_command(params[0], head);
-    			        if (command == NULL) {
-    			            printf("Invalid command: %s\n", params[0]);
-    			            goto NEXT; // rather than enclosing everything into a big else statement
-    			        }
-    			        params[0] = realloc(params[0], (strlen(command) + 1) * sizeof(char));
-    			        strcpy(params[0], command);
-    			        free(command);
-                        pid_t pid = fork();
-	            		if (pid == 0) {
-	            		    shell_printed = false;
-            		        execv(params[0], params);
-            		        delete_process_by_name(commands[i]); // delete from list by name since there is not pid associated with the process
-            		        printf("Command %s failed to run.\n", params[0]); 
-            		        abort = true;
-            		        do_exit = true;
-            		        
-	            		} else if (pid < 0) {
-	            		    printf("Failed to start process.\n");
-	            		} else {
-	            		    
-	            		    if (mode == SEQUENTIAL) {
-        	        			waitpid(0, NULL, 0);
-        	        		} else {
-        	        		    shell_printed = false; //making sure that the program knows that the shell has not been printed
-        	        		    add_process(pid, commands[i]);
-        	        		}	
-	            		}
-                    } 
-	            }
+    			if (params[0] != NULL) goto NEXT;
+			    if (is_built_in_command(params[0])) { //handle builtin commands
+                    shell_printed = false;
+    	    		run_builtin(params, buffer);
+            	} else {
+			        char* command = is_valid_command(params[0], head);
+			        if (command == NULL) {
+			            printf("Invalid command: %s\n", params[0]);
+			            goto NEXT; // rather than enclosing everything into a big else statement
+			        }
+			        params[0] = realloc(params[0], (strlen(command) + 1) * sizeof(char));
+			        strcpy(params[0], command);
+			        free(command);
+			        shell_printed = false;
+                    pid_t pid = fork();
+            		if (pid == 0) {
+        		        execv(params[0], params);
+        		        delete_process_by_name(commands[i]); // delete from list by name since there is not pid associated with the process
+        		        printf("Command %s failed to run.\n", params[0]); 
+        		        abort = true;
+        		        do_exit = true;
+        		        
+            		} else if (pid < 0) {
+            		    printf("Failed to start process.\n");
+            		} else {
+            		    
+            		    if (mode == SEQUENTIAL) {
+    	        			waitpid(0, NULL, 0);
+    	        		} else {
+    	        		    shell_printed = false; //making sure that the program knows that the shell has not been printed
+    	        		    add_process(pid, commands[i]);
+    	        		}	
+            		}
+                } 
 	            
 	    		NEXT:free_tokens(params);
 	    		if (abort) break;
