@@ -210,7 +210,8 @@ void execute_command(char** params, char* command, path* head, program_state** p
         pid_t pid = fork();
 		if (pid == 0) {
             execv(params[0], params);
-            delete_process_by_name(command); // delete from list by name since there is not pid associated with the process
+            if ((*p_state)->mode == PARALLEL)
+                delete_process_by_name(command); // delete from list by name since there is not pid associated with the process
             printf("Command %s failed to run.\n", params[0]); 
             (*p_state)->abort = true;
             (*p_state)->do_exit = true;
