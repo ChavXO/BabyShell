@@ -21,7 +21,7 @@
  * does not run files in the current path using my other implementation of path 
  * invalid write of size 4 when resuming job *** fixed *** resurfaced
  * sequence of invalid command causes memory leaks in address space of program in parallel execution behaviour is inconsistent *** fixed
- * someinconsistent behaviour when swiching between modes
+ * some inconsistent behaviour when swiching between modes
  */
 
 // shell constants
