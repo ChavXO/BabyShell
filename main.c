@@ -89,6 +89,9 @@ char* previous_directory(char* dir);
 void change_directory(char* dir);
 bool change_mode(char* mode_str, program_state** p_state);
 void print_processes(processes* head);
+void pause_process(char* id);
+void resume_process(char* id);
+void run_from_system(char* buffer, program_state* p_state);
 void manage_state();
 void set_process_state(pid_t pid, const char* set_state);
 
@@ -146,7 +149,7 @@ int run_shell(path* head) {
 void manage_state(program_state** p_state) {
     //change mode
     //if signal handler fails clean with wait
-    clean_up_processes(); // collect zombiw children if not caught by wait. chains of short commands hhad this problem
+    clean_up_processes(); // collect zombiw children if not caught by signal wait. chains of short commands had this problem
     if ((*p_state)->in_parallel) (*p_state)->mode = PARALLEL;
     else (*p_state)->mode = SEQUENTIAL; 
     
@@ -341,10 +344,10 @@ void change_directory(char* dir) {
         char * new_str ;
         int i;
         for (i = 0; cwd[i] != '\0'; i++);
-        if (dir[0] != '/') {
-            cwd[i] = '/';
-            cwd[i + 1] = '\0';
-         }
+
+        cwd[i] = '/';
+        cwd[i + 1] = '\0';
+     
         //concatenate string to directory
         if((new_str = calloc(strlen(cwd)+strlen(dir)+1, sizeof(char*))) != NULL){
             new_str[0] = '\0';   // ensures the memory is an empty string
@@ -491,7 +494,6 @@ void free_path(path* head) {
 }
 
 void run_builtin(char** params, char* buffer, program_state** p_state) {
-    //multiple arguments vs global variables
     if (strcmp(params[0], "cd") == 0) {
         change_directory(params[1]);
     } else if (strcmp(params[0], "jobs") == 0) {
@@ -499,63 +501,54 @@ void run_builtin(char** params, char* buffer, program_state** p_state) {
     } else if (strcmp(params[0], "mode") == 0) {
         (*p_state)->in_parallel = change_mode(params[1], p_state);
     } else if (strcmp(params[0], "resume") == 0) {
-        if (params[1] ==  NULL) {
-            printf("resume takes in the process ID as an argument.\n");
-        } else {
-            pid_t pid = strtol(params[1], NULL, 10);
-            if (pid == 0) {
-                printf("Invalid process id.\n");
-                return;
-            }
-            if (kill(pid, SIGCONT) == 0) {
-                set_process_state(pid, "running");
-            }
-        }
+        if (params[1] ==  NULL) printf("resume takes in the process ID as an argument.\n");
+        else resume_process(params[1]);
     } else if (strcmp(params[0], "pause") == 0) {
-        if (params[1] ==  NULL) {
-            printf("pause takes in the process ID as an argument.\n");
-        } else {
-            pid_t pid = strtol(params[1], NULL, 10);  
-            if (pid == 0) {
-                printf("Invalid process id.\n");
-                return;
-            }
-            if (kill(pid, SIGSTOP) == 0)
-                set_process_state(pid, "paused");
-        }
+        if (params[1] ==  NULL) printf("pause takes in the process ID as an argument.\n");
+        else pause_process(params[1]);
     } else if (strcmp(params[0], "exit") == 0) {
-        if (_inc_jobs(0) > 0) {
-            printf("You cannot exit while there are processes running.\n");
-        }
-        else
-            (*p_state)->do_exit = true;
+        if (_inc_jobs(0) > 0) printf("You cannot exit while there are processes running.\n");
+        else (*p_state)->do_exit = true;
     } else {
-        if ((*p_state)->mode == SEQUENTIAL)
-            system(buffer);
-        else {
-            //might need to pass in commands for this to be fully functional
-            int comm = 0;
-            int arguments = 0;
-            if (params[0] != NULL) {
-                comm = strlen(params[0]);
-            }
-            if (params[1] != NULL) {
-                arguments = strlen(params[1]);
-            }
-            char* tmp = calloc(comm + arguments + 5, sizeof(char));
-            // add ampersand to make parallel
-            strcat(tmp, params[0]);
-            strcat(tmp, " ");
-            if (arguments > 0)
-                strcat(tmp, params[1]);
-            strcat(tmp, " &");
-            system(tmp);
-            free(tmp);
-            shell_printed = false;
-            //show_prompt(); //built_in commands don't return in signal
-        }
+        run_from_system(buffer, (*p_state));
     }
     return;
+}
+
+void pause_process(char* id) {
+    pid_t pid = strtol(id, NULL, 10);  
+    if (pid == 0) {
+        printf("Invalid process id.\n");
+        return;
+    }
+    if (kill(pid, SIGSTOP) == 0)
+        set_process_state(pid, "paused");
+}
+
+void resume_process(char* id) {
+    pid_t pid = strtol(id, NULL, 10);
+    if (pid == 0) {
+        printf("Invalid process id.\n");
+        return;
+    }
+    if (kill(pid, SIGCONT) == 0) {
+        set_process_state(pid, "running");
+    }
+}
+
+void run_from_system(char* buffer, program_state* p_state) {
+    if (p_state->mode == SEQUENTIAL) {
+        system(buffer);
+        return;
+    }
+    
+    char* tmp = calloc(strlen(buffer) + 3, sizeof(char));
+    // add ampersand to make parallel
+    strcat(tmp, buffer);
+    strcat(tmp, " &");
+    system(tmp);
+    free(tmp);
+    shell_printed = false;
 }
 
 void poll_results() {
