@@ -129,34 +129,21 @@ int run_shell(path* head) {
 			char** commands = splitCommands(buffer);
             run_commands(buffer, commands, head);
 	    	free_tokens(commands); 
-	    } else {
-	        //put something
-	    }	    
+	    } else continue; 
 
-	    if (do_exit){    	    
-	        break; //check background
-	    }
+	    if (do_exit) break; //check background
 	  
-	    if (feof(stdin)) { 
-	        printf("\nYou cannot exit while there are processes running.\n");
-	    }
+	    if (feof(stdin)) printf("\nYou cannot exit while there are processes running.\n"); //unindented single line iff statements help make the code readable for me
 	   
 	    //change mode
-	    if (in_parallel) {
-	        mode = PARALLEL;
-	    } else {
-	        mode = SEQUENTIAL;
-	    } 
+	    if (in_parallel) mode = PARALLEL;
+	    else mode = SEQUENTIAL; 
 	    
 	    if (mode == PARALLEL) {
 	        poll_results(); //using this as a non-blocking wait
-            if (shell_printed == false) {
-        	    show_prompt();
-        	}
+            if (shell_printed == false) show_prompt();
         	shell_printed = true;
-        } else {
-            show_prompt();
-        }
+        } else show_prompt();
 	}
 	free(head_jobs);
     return 0;
@@ -194,18 +181,15 @@ void run_commands(char* buffer, char** commands, path* head) {
 		        abort = true;
 		        do_exit = true;
 		        
-    		} else if (pid < 0) {
-    		    printf("Failed to start process.\n");
-    		} else {
-    		    if (mode == SEQUENTIAL) {
-        			waitpid(0, NULL, 0);
-        		} else {
+    		} else if (pid < 0) printf("Failed to start process.\n");
+    		else {
+    		    if (mode == SEQUENTIAL) waitpid(0, NULL, 0);
+        		else {
         		    shell_printed = false; //making sure that the program knows that the shell has not been printed
         		    add_process(pid, commands[i]);
         		}	
     		}
         } 
-        
 		NEXT:free_tokens(params);
 		if (abort) return;
 	}
@@ -214,7 +198,6 @@ void run_commands(char* buffer, char** commands, path* head) {
 
 void show_prompt() {
     char cwd[1024];
-    
     if (getcwd(cwd, sizeof(cwd)) != NULL)
     	printf("%s> ", cwd);
     else
