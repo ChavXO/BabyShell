@@ -150,6 +150,7 @@ void manage_state(program_state** p_state) {
     //change mode
     //if signal handler fails clean with wait
     clean_up_processes(); // collect zombiw children if not caught by signal wait. chains of short commands had this problem
+    shell_printed = false;
     if ((*p_state)->in_parallel) (*p_state)->mode = PARALLEL;
     else (*p_state)->mode = SEQUENTIAL; 
     
@@ -367,7 +368,7 @@ void change_directory(char* dir) {
 }
 
 bool is_built_in_command(char* command) {
-    char* builtin [] = {"exit", "pwd", "cd", "mode", "echo", "type", "resume", "pause", "jobs", "help", NULL};
+    char* builtin [] = {"exit", "pwd", "mode", "echo", "type", "resume", "pause", "jobs", "help", "history", "time", "cd", NULL};
     int i;
     for (i = 0; builtin[i] != NULL; i++) {
         if (strncmp(command, builtin[i], strlen(command)) == 0) return true;
@@ -494,6 +495,7 @@ void free_path(path* head) {
 }
 
 void run_builtin(char** params, char* buffer, program_state** p_state) {
+    shell_printed = false;
     if (strcmp(params[0], "cd") == 0) {
         change_directory(params[1]);
     } else if (strcmp(params[0], "jobs") == 0) {
