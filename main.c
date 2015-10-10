@@ -35,6 +35,7 @@ typedef struct _prog_state {
     bool shell_printed;    
 } program_state;
 
+// global variables
 bool do_exit = false;
 bool in_parallel = false;
 int mode = SEQUENTIAL;
@@ -52,9 +53,10 @@ typedef struct _path {
     struct _path *next;
 } path;
 
-// doubly linked list for keeping track of history
+
 typedef enum {RUNNING, PAUSED, DEAD} state;
 
+// doubly linked list for keeping track of history
 typedef struct _processes {
     struct _processes *previous;
     pid_t id;
@@ -65,6 +67,7 @@ typedef struct _processes {
 
 processes* head_jobs;
 
+// functions for initialising the shell
 int run_shell(path* head);
 int _inc_jobs(int n);
 void show_prompt();
@@ -75,6 +78,7 @@ path* load_path_from_list(char** environment); //helper function for load_enviro
 path *load_path(const char *filename); //load path from file
 void free_path(path* head);
 
+// functions for processing input
 char** tokenify(char* buffer, char* split);
 char** splitCommands(char* buffer);
 char* is_valid_command(char* command, path* head);
@@ -82,12 +86,15 @@ void remove_comments(char* buffer);
 bool is_built_in_command(char* command);
 void run_builtin(char** params, char* buffer);
 
+// runner functions
+void run_commands(char* buffer, char** commands, path* head);
 char* previous_directory(char* dir);
 void change_directory(char* dir);
 bool change_mode(char* mode_str);
 void print_processes(processes* head);
 void set_process_state(pid_t pid, const char* set_state);
 
+// clean up and debugging
 void print_path(path* head, int num_words); //debugging
 void list_clear(path *list);
 path* list_append(char* curr, path *list);
@@ -109,7 +116,6 @@ int main() {
 }
 
 int run_shell(path* head) {
-    char whitespace [4] = "\n\t\r ";
     head_jobs = (processes*) calloc(1, sizeof(processes));
     head_jobs->next = NULL;
     head_jobs->previous = NULL;
@@ -121,59 +127,13 @@ int run_shell(path* head) {
 		if (fgets(buffer, 1024, stdin) != NULL) {
 		    remove_comments(buffer);
 			char** commands = splitCommands(buffer);
-            int i;
-
-			for (i = 0; commands[i] != NULL; i++) {
-			    char** params = tokenify(commands[i], whitespace);
-			    remove_comments(commands[i]);
-                bool abort = false;
-    			if (params[0] == NULL) goto NEXT; // go to the end and free if there are no commands. Preferred over big else statement
-    			
-			    if (is_built_in_command(params[0])) { //handle builtin commands
-                    shell_printed = false;
-    	    		run_builtin(params, buffer);
-            	} else {
-			        char* command = is_valid_command(params[0], head);
-			        if (command == NULL) {
-			            printf("Invalid command: %s\n", params[0]);
-			            goto NEXT; // rather than enclosing everything into a big else statement
-			        }
-			        params[0] = realloc(params[0], (strlen(command) + 1) * sizeof(char));
-			        strcpy(params[0], command);
-			        free(command);
-			        shell_printed = false;
-			        
-                    pid_t pid = fork();
-            		if (pid == 0) {
-        		        execv(params[0], params);
-        		        delete_process_by_name(commands[i]); // delete from list by name since there is not pid associated with the process
-        		        printf("Command %s failed to run.\n", params[0]); 
-        		        abort = true;
-        		        do_exit = true;
-        		        
-            		} else if (pid < 0) {
-            		    printf("Failed to start process.\n");
-            		} else {
-            		    
-            		    if (mode == SEQUENTIAL) {
-    	        			waitpid(0, NULL, 0);
-    	        		} else {
-    	        		    shell_printed = false; //making sure that the program knows that the shell has not been printed
-    	        		    add_process(pid, commands[i]);
-    	        		}	
-            		}
-                } 
-	            
-	    		NEXT:free_tokens(params);
-	    		if (abort) break;
-	    	}
+            run_commands(buffer, commands, head);
 	    	free_tokens(commands); 
 	    } else {
 	        //put something
 	    }	    
 
-	    if (do_exit){
-    	    
+	    if (do_exit){    	    
 	        break; //check background
 	    }
 	  
@@ -197,11 +157,59 @@ int run_shell(path* head) {
         } else {
             show_prompt();
         }
-        
-        
 	}
 	free(head_jobs);
     return 0;
+}
+
+void run_commands(char* buffer, char** commands, path* head) {
+    char whitespace [4] = "\n\t\r ";
+    int i;
+    for (i = 0; commands[i] != NULL; i++) {
+        char** params = tokenify(commands[i], whitespace);
+        remove_comments(commands[i]);
+        bool abort = false;
+		if (params[0] == NULL) goto NEXT; // go to the end and free if there are no commands. Preferred over big else statement
+		
+        if (is_built_in_command(params[0])) { //handle builtin commands
+            shell_printed = false;
+    		run_builtin(params, buffer);
+    	} else {
+            char* command = is_valid_command(params[0], head);
+            if (command == NULL) {
+                printf("Invalid command: %s\n", params[0]);
+                goto NEXT; // rather than a big else statement
+            }
+            // copies updated command into params[0]
+            params[0] = realloc(params[0], (strlen(command) + 1) * sizeof(char));
+            strcpy(params[0], command);
+            free(command);
+            shell_printed = false;
+            
+            pid_t pid = fork();
+    		if (pid == 0) {
+		        execv(params[0], params);
+		        delete_process_by_name(commands[i]); // delete from list by name since there is not pid associated with the process
+		        printf("Command %s failed to run.\n", params[0]); 
+		        abort = true;
+		        do_exit = true;
+		        
+    		} else if (pid < 0) {
+    		    printf("Failed to start process.\n");
+    		} else {
+    		    if (mode == SEQUENTIAL) {
+        			waitpid(0, NULL, 0);
+        		} else {
+        		    shell_printed = false; //making sure that the program knows that the shell has not been printed
+        		    add_process(pid, commands[i]);
+        		}	
+    		}
+        } 
+        
+		NEXT:free_tokens(params);
+		if (abort) return;
+	}
+	return;
 }
 
 void show_prompt() {
