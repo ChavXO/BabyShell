@@ -19,7 +19,7 @@
  * crtl + d combination does not show an error message for exit while tasks are running *** fixed
  * does not run files in the current path using my other implementation of path 
  * invalid write of size 4 when resuming job *** fixed (changed current from a processes* to pr
- * sequence of invalid command causes memory leaks in address space of program in parallel execution
+ * sequence of invalid command causes memory leaks in address space of program in parallel execution behaviour is inconsistent
  */
 
 // shell constants
