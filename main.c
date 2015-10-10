@@ -112,8 +112,8 @@ int main() {
     system("reset"); //run reset in parallel to reduce lag time
     //signal(SIGCHLD, sig_comm); //moved down so that signal is only set in parallel. No need to define it in sequential
     printf("%c]0;%s%c", '\033', "Shelby the Shell", '\007'); // window title
-    //path* head = load_environment();
-    path* head = load_path("shell-config");
+    path* head = load_environment();
+    //path* head = load_path("shell-config");
     int res = run_shell(head);	
     free_path(head);
     return res;
@@ -137,9 +137,8 @@ int run_shell(path* head) {
 
 	    if (do_exit) break; //check background
 	      
-	    if (feof(stdin)) printf("\nYou cannot exit while there are processes running.\n"); //unindented single line iff statements help make the code readable for me	   
+	    if (feof(stdin)) printf("\nYou cannot exit while there are processes running.\n"); //unindented single line if statements help make the code readable for me
 	    manage_state();   
-	    //if (_inc_jobs(0) > 0) clean_up_processes(); //in case some process' exit signal wasn't handled
     }
     free(head_jobs);
     return 0;
@@ -147,17 +146,8 @@ int run_shell(path* head) {
 
 void manage_state() {
     //change mode
-    /*
-    if (_inc_jobs(0) > 0) {
-		int pid = waitpid(-1, NULL, WNOHANG | WUNTRACED);
-		while (pid > 0) {	
-			printf("\nProcess %d finished running.\n", pid);
-			shell_printed = true;
-            show_prompt();
-			delete_process(pid);
-			pid = waitpid(-1, NULL, WNOHANG);
-		}
-	}*/ //only ran on the next command input
+    //if signal handler fails clean with wait
+    clean_up_processes(); // collect zombiw children if not caught by wait. chains of short commands hhad this problem
     if (in_parallel) mode = PARALLEL;
     else mode = SEQUENTIAL; 
     
@@ -169,17 +159,16 @@ void manage_state() {
 }
 
 void clean_up_processes() {
-    processes* current = head_jobs;
-    while (current != NULL) {
-        pid_t pid = proc_find(current->prc_name);
-        if (pid == -1) {
-            processes* tmp = current->next;
-            delete_process_by_name(current->prc_name);
-            current = tmp;
-            continue;
-        }
-        current = current->next;
-    }
+    if (_inc_jobs(0) > 0) {
+		int pid = waitpid(-1, NULL, WNOHANG | WUNTRACED);
+		while (pid > 0) {	
+			printf("\nProcess %d finished running.\n", pid);
+			shell_printed = true;
+            show_prompt();
+			delete_process(pid);
+			pid = waitpid(-1, NULL, WNOHANG);
+		}
+	} //only ran on the next command input so I used it with signal
 }
 
 void run_commands(char* buffer, char** commands, path* head) {
@@ -429,44 +418,6 @@ bool change_mode(char* mode_str) {
     }
     // default case is to return the current mode
     return in_parallel;
-}
-
-pid_t proc_find(char* name) {
-    DIR* dir;
-    struct dirent* ent;
-    char* endptr;
-    char buf[512];
-    if (!(dir = opendir("/proc"))) {
-        perror("can't open /proc");
-        return -1;
-    }
-
-    while((ent = readdir(dir)) != NULL) {
-        /* if endptr is not a null character, the directory is not
-         * entirely numeric, so ignore it */
-        long lpid = strtol(ent->d_name, &endptr, 10);
-        if (*endptr != '\0') {
-            continue;
-        }
-        /* try to open the cmdline file */
-        snprintf(buf, sizeof(buf), "/proc/%ld/cmdline", lpid);
-        FILE* fp = fopen(buf, "r");
-        if (fp) {
-            if (fgets(buf, sizeof(buf), fp) != NULL) {
-                /* check the first token in the file, the program name */
-                char* first = strtok(buf, " ");
-                if (!strcmp(first, name)) {
-                    fclose(fp);
-                    closedir(dir);
-                    return (pid_t)lpid;
-                }
-            }
-            fclose(fp);
-        }
-
-    }
-    closedir(dir);
-    return -1;
 }
 
 void sig_comm() {
