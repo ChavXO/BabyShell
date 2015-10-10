@@ -116,7 +116,7 @@ int main() {
     path* head = load_path("shell-config");
     int res = run_shell(head);	
     free_path(head);
-	return res;
+    return res;
 }
 
 int run_shell(path* head) {
@@ -125,23 +125,23 @@ int run_shell(path* head) {
     head_jobs->previous = NULL;
     show_prompt();
     signal(SIGCHLD, sig_comm);
-	while(!feof(stdin) || _inc_jobs(0) != 0) {
-		char buffer [1024];
-		shell_printed = false;
-		if (fgets(buffer, 1024, stdin) != NULL) {
-		    remove_comments(buffer);
-			char** commands = splitCommands(buffer);
+    while(!feof(stdin) || _inc_jobs(0) != 0) {
+        char buffer [1024];
+        shell_printed = false;
+	if (fgets(buffer, 1024, stdin) != NULL) {
+	    remove_comments(buffer);
+	    char** commands = splitCommands(buffer);
             run_commands(buffer, commands, head);
-	    	free_tokens(commands); 
-	    } else continue; 
+	    free_tokens(commands); 
+	} else continue; 
 
-	    if (do_exit) break; //check background
+	if (do_exit) break; //check background
 	  
-	    if (feof(stdin)) printf("\nYou cannot exit while there are processes running.\n"); //unindented single line iff statements help make the code readable for me	   
-	    manage_state();   
-	    if (_inc_jobs(0) > 0) clean_up_processes(); //in case some process' exit signal wasn't handled
-	}
-	free(head_jobs);
+	if (feof(stdin)) printf("\nYou cannot exit while there are processes running.\n"); //unindented single line iff statements help make the code readable for me	   
+	manage_state();   
+	if (_inc_jobs(0) > 0) clean_up_processes(); //in case some process' exit signal wasn't handled
+    }
+    free(head_jobs);
     return 0;
 }
 
