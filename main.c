@@ -126,7 +126,8 @@ int run_shell(path* head) {
 			    char** params = tokenify(commands[i], whitespace);
 			    remove_comments(commands[i]);
                 bool abort = false;
-    			if (params[0] != NULL) goto NEXT;
+    			if (params[0] == NULL) goto NEXT;
+    			
 			    if (is_built_in_command(params[0])) { //handle builtin commands
                     shell_printed = false;
     	    		run_builtin(params, buffer);
@@ -140,6 +141,7 @@ int run_shell(path* head) {
 			        strcpy(params[0], command);
 			        free(command);
 			        shell_printed = false;
+			        
                     pid_t pid = fork();
             		if (pid == 0) {
         		        execv(params[0], params);
