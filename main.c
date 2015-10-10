@@ -196,22 +196,18 @@ void run_commands(char** commands, path* head, program_state** p_state) {
 
 void execute_command(char** params, char* command, path* head, program_state** p_state) {
     if (params[0] == NULL) return;
-
     if (is_built_in_command(params[0])) { //handle builtin commands
-        shell_printed = false;
 		run_builtin(params, command, p_state);
 	} else {
-        char* curr_command = is_valid_command(params[0], head);
+        char* curr_command = is_valid_command(params[0], head); // checks if valid, attaches path to code
         if (curr_command == NULL) {
             printf("Invalid command: %s\n", params[0]);
             return;
         }
-        // copies updated command into params[0]
         params[0] = realloc(params[0], (strlen(curr_command) + 1) * sizeof(char));
         strcpy(params[0], curr_command);
         free(curr_command);
         shell_printed = false;
-        
         pid_t pid = fork();
 		if (pid == 0) {
             execv(params[0], params);
@@ -220,7 +216,6 @@ void execute_command(char** params, char* command, path* head, program_state** p
             printf("Command %s failed to run.\n", params[0]); 
             (*p_state)->abort = true;
             (*p_state)->do_exit = true;
-            
 		} else if (pid < 0) printf("Failed to start process.\n");
 		else {
 		    if ((*p_state)->mode == SEQUENTIAL) waitpid(0, NULL, 0);
