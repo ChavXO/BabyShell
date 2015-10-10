@@ -100,7 +100,7 @@ void set_process_state(pid_t pid, const char* set_state);
 // clean up and debugging
 void print_path(path* head, int num_words); //debugging
 void list_clear(path *list);
-void clean_up_processes();
+void clean_up_processes(); // defensive mechanism because delete is asynchronous
 path* list_append(char* curr, path *list);
 void free_tokens(char** tokens);
 void add_process(pid_t pid, char* process_name);
@@ -128,18 +128,18 @@ int run_shell(path* head) {
     while(!feof(stdin) || _inc_jobs(0) != 0) {
         char buffer [1024];
         shell_printed = false;
-	if (fgets(buffer, 1024, stdin) != NULL) {
-	    remove_comments(buffer);
-	    char** commands = splitCommands(buffer);
+	    if (fgets(buffer, 1024, stdin) != NULL) {
+	        remove_comments(buffer);
+	        char** commands = splitCommands(buffer);
             run_commands(buffer, commands, head);
-	    free_tokens(commands); 
-	} else continue; 
+	        free_tokens(commands); 
+	    } else continue; 
 
-	if (do_exit) break; //check background
-	  
-	if (feof(stdin)) printf("\nYou cannot exit while there are processes running.\n"); //unindented single line iff statements help make the code readable for me	   
-	manage_state();   
-	if (_inc_jobs(0) > 0) clean_up_processes(); //in case some process' exit signal wasn't handled
+	    if (do_exit) break; //check background
+	      
+	    if (feof(stdin)) printf("\nYou cannot exit while there are processes running.\n"); //unindented single line iff statements help make the code readable for me	   
+	    manage_state();   
+	    //if (_inc_jobs(0) > 0) clean_up_processes(); //in case some process' exit signal wasn't handled
     }
     free(head_jobs);
     return 0;
@@ -147,6 +147,17 @@ int run_shell(path* head) {
 
 void manage_state() {
     //change mode
+    /*
+    if (_inc_jobs(0) > 0) {
+		int pid = waitpid(-1, NULL, WNOHANG | WUNTRACED);
+		while (pid > 0) {	
+			printf("\nProcess %d finished running.\n", pid);
+			shell_printed = true;
+            show_prompt();
+			delete_process(pid);
+			pid = waitpid(-1, NULL, WNOHANG);
+		}
+	}*/ //only ran on the next command input
     if (in_parallel) mode = PARALLEL;
     else mode = SEQUENTIAL; 
     
@@ -540,8 +551,9 @@ void run_builtin(char** params, char* buffer) {
                 printf("Invalid process id.\n");
                 return;
             }
-            if (kill(pid, SIGCONT) == 0)
+            if (kill(pid, SIGCONT) == 0) {
                 set_process_state(pid, "running");
+            }
         }
     } else if (strcmp(params[0], "pause") == 0) {
         if (params[1] ==  NULL) {
