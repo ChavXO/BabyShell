@@ -475,14 +475,22 @@ void run_builtin(char** params, char* buffer) {
             printf("resume takes in the process ID as an argument.\n");
         } else {
             pid_t pid = strtol(params[1], NULL, 10);
+            if (pid == 0) {
+                printf("Invalid process id.\n");
+                return;
+            }
             if (kill(pid, SIGCONT) == 0)
                 set_process_state(pid, "running");
         }
     } else if (strcmp(params[0], "pause") == 0) {
         if (params[1] ==  NULL) {
-            printf("resume takes in the process ID as an argument.\n");
+            printf("pause takes in the process ID as an argument.\n");
         } else {
-            pid_t pid = strtol(params[1], NULL, 10);        
+            pid_t pid = strtol(params[1], NULL, 10);  
+            if (pid == 0) {
+                printf("Invalid process id.\n");
+                return;
+            }
             if (kill(pid, SIGSTOP) == 0)
                 set_process_state(pid, "paused");
         }
@@ -578,7 +586,7 @@ void set_process_state (pid_t pid, const char* set_state) {
     }
     
     if (current == NULL) {
-        printf("Process not found.\n");
+        printf("Could not find the job with id: %d.\n", pid);
         return;
     }
     
@@ -586,12 +594,15 @@ void set_process_state (pid_t pid, const char* set_state) {
     if (strcmp(set_state, "paused") == 0) {
         printf("Job paused.\n");
         (*tmp)->process_state = PAUSED;
+        return;
     }
         
     if (strcmp(set_state, "running") == 0) {
         printf("Job resumed.\n");
         (*tmp)->process_state = RUNNING;
+        return;
     }
+    
     return;
 }
 
