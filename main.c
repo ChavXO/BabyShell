@@ -19,6 +19,7 @@
  * crtl + d combination does not show an error message for exit while tasks are running *** fixed
  * does not run files in the current path using my other implementation of path 
  * invalid write of size 4 when resuming job *** fixed (changed current from a processes* to pr
+ * sequence of invalid command causes memory leaks in address space of program in parallel execution
  */
 
 // shell constants
@@ -117,7 +118,7 @@ int run_shell(path* head) {
 			for (i = 0; commands[i] != NULL; i++) {
 			    char** params = tokenify(commands[i], whitespace);
 			    remove_comments(commands[i]);
-
+                bool abort = false;
     			if (params[0] != NULL) {
                     if (!is_built_in_command(params[0])) {
                         pid_t pid = fork();
@@ -128,8 +129,9 @@ int run_shell(path* head) {
             		        } else {
             		            execv(params[0], params);
             		        }
-            		        delete_process_by_name(commands[0]); // for shell commands and invalid commands 
+            		        delete_process_by_name(commands[i]); // for shell commands and invalid commands 
             		        printf("Command %s not found.\n", params[0]);
+            		        abort = true;
             		        do_exit = true;
             		        
 	            		} else if (pid < 0) {
@@ -150,6 +152,7 @@ int run_shell(path* head) {
 	            }
 	            
 	    		free_tokens(params);
+	    		if (abort) break;
 	    	}
 	    	free_tokens(commands); 
 	    } else {
