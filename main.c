@@ -19,9 +19,9 @@
  * chain of bogus commands fills process list *** fixed
  * crtl + d combination does not show an error message for exit while tasks are running *** fixed
  * does not run files in the current path using my other implementation of path 
- * invalid write of size 4 when resuming job *** fixed *** resurfaced
+ * invalid write of size 4 when resuming job *** fixed *** resurfaced *** fixed by passing around sate
  * sequence of invalid command causes memory leaks in address space of program in parallel execution behaviour is inconsistent *** fixed
- * some inconsistent behaviour when swiching between modes
+ * some inconsistent behaviour when swiching between modes ** fixed by making state a variable that is passed between functions
  */
 
 // shell constants
@@ -32,15 +32,9 @@ static const int PARALLEL   = 1;
 typedef struct _prog_state {
     bool do_exit;
     bool in_parallel;
+    bool abort;
     int mode;
-    bool shell_printed;    
 } program_state;
-
-// global variables
-bool do_exit = false;
-bool in_parallel = false;
-int mode = SEQUENTIAL;
-bool shell_printed = false;
 
 // plan to implement bangs
 typedef struct _history {
@@ -67,6 +61,7 @@ typedef struct _processes {
 } processes;
 
 processes* head_jobs;
+bool shell_printed = false;
 
 // functions for initialising the shell
 int run_shell(path* head);
@@ -74,7 +69,6 @@ int _inc_jobs(int n);
 void show_prompt();
 void poll_results();
 void sig_comm();
-pid_t proc_find(char* name);
 path* load_environment(); //sets envronment from computer's $PATH variable
 path* load_path_from_list(char** environment); //helper function for load_environment
 path *load_path(const char *filename); //load path from file
@@ -86,13 +80,14 @@ char** splitCommands(char* buffer);
 char* is_valid_command(char* command, path* head);
 void remove_comments(char* buffer);
 bool is_built_in_command(char* command);
-void run_builtin(char** params, char* buffer);
+void run_builtin(char** params, char* buffer, program_state** p_state);
 
 // runner functions
-void run_commands(char* buffer, char** commands, path* head);
+void run_commands(char** commands, path* head, program_state** p_state);
+void execute_command(char** params, char* commands, path* head, program_state** p_state);
 char* previous_directory(char* dir);
 void change_directory(char* dir);
-bool change_mode(char* mode_str);
+bool change_mode(char* mode_str, program_state** p_state);
 void print_processes(processes* head);
 void manage_state();
 void set_process_state(pid_t pid, const char* set_state);
@@ -110,7 +105,6 @@ void delete_process_by_name(char* process_name);
 int main() {
     // removed ampersand because the behaviour was inconsistent
     system("reset"); //run reset in parallel to reduce lag time
-    //signal(SIGCHLD, sig_comm); //moved down so that signal is only set in parallel. No need to define it in sequential
     printf("%c]0;%s%c", '\033', "Shelby the Shell", '\007'); // window title
     path* head = load_environment();
     //path* head = load_path("shell-config");
@@ -120,38 +114,43 @@ int main() {
 }
 
 int run_shell(path* head) {
+    // initialisation
+    program_state* p_state = (program_state*) calloc(1, sizeof(program_state));
+    p_state->do_exit = false;
+    p_state->in_parallel = false;
+    p_state->mode = SEQUENTIAL;
     head_jobs = (processes*) calloc(1, sizeof(processes));
     head_jobs->next = NULL;
     head_jobs->previous = NULL;
     show_prompt();
-    signal(SIGCHLD, sig_comm);
+    signal(SIGCHLD, sig_comm); //signal handler notifies user asynchronously. I like that feature better than the waitpid notification after input so I'll run both in tandem
     while(!feof(stdin) || _inc_jobs(0) != 0) {
         char buffer [1024];
         shell_printed = false;
 	    if (fgets(buffer, 1024, stdin) != NULL) {
 	        remove_comments(buffer);
 	        char** commands = splitCommands(buffer);
-            run_commands(buffer, commands, head);
+            run_commands(commands, head, &p_state);
 	        free_tokens(commands); 
 	    } else continue; 
-
-	    if (do_exit) break; //check background
+	    if (p_state->do_exit) break; //check background
 	      
 	    if (feof(stdin)) printf("\nYou cannot exit while there are processes running.\n"); //unindented single line if statements help make the code readable for me
-	    manage_state();   
+	    manage_state(&p_state);   
     }
+    free(p_state);
     free(head_jobs);
     return 0;
 }
 
-void manage_state() {
+void manage_state(program_state** p_state) {
     //change mode
     //if signal handler fails clean with wait
     clean_up_processes(); // collect zombiw children if not caught by wait. chains of short commands hhad this problem
-    if (in_parallel) mode = PARALLEL;
-    else mode = SEQUENTIAL; 
+    if ((*p_state)->in_parallel) (*p_state)->mode = PARALLEL;
+    else (*p_state)->mode = SEQUENTIAL; 
     
-    if (mode == PARALLEL) {
+    if ((*p_state)->mode == PARALLEL) {
         poll_results(); //using this as a non-blocking wait
         if (shell_printed == false) show_prompt();
     	shell_printed = true;
@@ -160,7 +159,7 @@ void manage_state() {
 
 void clean_up_processes() {
     if (_inc_jobs(0) > 0) {
-		int pid = waitpid(-1, NULL, WNOHANG | WUNTRACED);
+		int pid = waitpid(-1, NULL, WNOHANG);
 		while (pid > 0) {	
 			printf("\nProcess %d finished running.\n", pid);
 			shell_printed = true;
@@ -168,54 +167,59 @@ void clean_up_processes() {
 			delete_process(pid);
 			pid = waitpid(-1, NULL, WNOHANG);
 		}
-	} //only ran on the next command input so I used it with signal
+	} //only ran on the next command input so I used it in conjunction with signal
 }
 
-void run_commands(char* buffer, char** commands, path* head) {
+void run_commands(char** commands, path* head, program_state** p_state) {
     char whitespace [4] = "\n\t\r ";
     int i;
     for (i = 0; commands[i] != NULL; i++) {
-        char** params = tokenify(commands[i], whitespace);
         remove_comments(commands[i]);
+        char** params = tokenify(commands[i], whitespace);
+        
         bool abort = false;
-		if (params[0] == NULL) goto NEXT; // go to the end and free if there are no commands. Preferred over big else statement
-		
-        if (is_built_in_command(params[0])) { //handle builtin commands
-            shell_printed = false;
-    		run_builtin(params, buffer);
-    	} else {
-            char* command = is_valid_command(params[0], head);
-            if (command == NULL) {
-                printf("Invalid command: %s\n", params[0]);
-                goto NEXT; // rather than a big else statement
-            }
-            // copies updated command into params[0]
-            params[0] = realloc(params[0], (strlen(command) + 1) * sizeof(char));
-            strcpy(params[0], command);
-            free(command);
-            shell_printed = false;
-            
-            pid_t pid = fork();
-    		if (pid == 0) {
-		        execv(params[0], params);
-		        delete_process_by_name(commands[i]); // delete from list by name since there is not pid associated with the process
-		        printf("Command %s failed to run.\n", params[0]); 
-		        abort = true;
-		        do_exit = true;
-		        
-    		} else if (pid < 0) printf("Failed to start process.\n");
-    		else {
-    		    if (mode == SEQUENTIAL) waitpid(0, NULL, 0);
-        		else {
-        		    shell_printed = false; //making sure that the program knows that the shell has not been printed
-        		    add_process(pid, commands[i]);
-        		}	
-    		}
-        } 
-		NEXT:free_tokens(params);
+        execute_command(params, commands[i], head, p_state); 
+		free_tokens(params);
 		if (abort) return;
 	}
 	return;
+}
+
+void execute_command(char** params, char* command, path* head, program_state** p_state) {
+    if (params[0] == NULL) return;
+
+    if (is_built_in_command(params[0])) { //handle builtin commands
+        shell_printed = false;
+		run_builtin(params, command, p_state);
+	} else {
+        char* curr_command = is_valid_command(params[0], head);
+        if (curr_command == NULL) {
+            printf("Invalid command: %s\n", params[0]);
+            return;
+        }
+        // copies updated command into params[0]
+        params[0] = realloc(params[0], (strlen(curr_command) + 1) * sizeof(char));
+        strcpy(params[0], curr_command);
+        free(curr_command);
+        shell_printed = false;
+        
+        pid_t pid = fork();
+		if (pid == 0) {
+            execv(params[0], params);
+            delete_process_by_name(command); // delete from list by name since there is not pid associated with the process
+            printf("Command %s failed to run.\n", params[0]); 
+            (*p_state)->abort = true;
+            (*p_state)->do_exit = true;
+            
+		} else if (pid < 0) printf("Failed to start process.\n");
+		else {
+		    if ((*p_state)->mode == SEQUENTIAL) waitpid(0, NULL, 0);
+    		else {
+    		    shell_printed = false; //making sure that the program knows that the shell has not been printed
+    		    add_process(pid, command);
+    		}	
+		}
+    }
 }
 
 void show_prompt() {
@@ -232,17 +236,13 @@ void show_prompt() {
 char** tokenify(char* buffer, char* split) {
 	char* string = strdup(buffer);
 	char* token = NULL;
-	int i = 0;
-    
+	int i = 0;    
     //count the number of delimiters
-	for (token = strtok(string, split); token != NULL; token = strtok(NULL, split)) {
-		i += 1;
-	}
+	for (token = strtok(string, split); token != NULL; token = strtok(NULL, split)) i += 1;
 
 	char** final_tok = calloc(i + 1, sizeof(char**));
 	i = 0;
 	free(string);
-
 	string = strdup(buffer);
 	
 	//put strings into final_tok array
@@ -266,7 +266,6 @@ char* is_valid_command(char* command, path* head) {
     path* temp = head;
     
     while (temp != NULL) {        
-        // duplicate code for this and execute. might just return the string
 	    struct stat statresult;
 	    // add string to each path
         char comm[1024]= "";
@@ -337,12 +336,15 @@ void change_directory(char* dir) {
         char* prev_dir = previous_directory(cwd);
         chdir(prev_dir);
         free(prev_dir);
+        return;
     } else if ((strstr("/", dir) != NULL)) { //if the string contains no slashes assume it is the cwd
         char * new_str ;
         int i;
         for (i = 0; cwd[i] != '\0'; i++);
-        cwd[i] = '/';
-        cwd[i + 1] = '\0';
+        if (dir[0] != '/') {
+            cwd[i] = '/';
+            cwd[i + 1] = '\0';
+         }
         //concatenate string to directory
         if((new_str = calloc(strlen(cwd)+strlen(dir)+1, sizeof(char*))) != NULL){
             new_str[0] = '\0';   // ensures the memory is an empty string
@@ -350,12 +352,15 @@ void change_directory(char* dir) {
             strcat(new_str,dir);
             chdir(new_str);
             free(new_str);
+            return;
         } else {
             return; //error
         }
     } else {
         chdir(dir);
+        return;
     }
+    printf("Directory %s not found.\n", dir);
 }
 
 bool is_built_in_command(char* command) {
@@ -401,12 +406,12 @@ void list_clear(path *list) {
     }
 }
 
-bool change_mode(char* mode_str) {
+bool change_mode(char* mode_str, program_state** p_state) {
     if (mode_str == NULL){
-        if (mode == 0) {
+        if ((*p_state)->mode == 0) {
             printf("Running in sequential mode.\n");
         }
-        if (mode == 1) {
+        if ((*p_state)->mode == 1) {
             printf("Running in parallel mode.\n");
         }
     } else if (strcmp(mode_str, "parallel") == 0 || strcmp(mode_str, "p") == 0) {
@@ -417,7 +422,7 @@ bool change_mode(char* mode_str) {
         printf("Unrecognised mode: %s.\nValid entires are parallel or p, or sequential or s.\n", mode_str);
     }
     // default case is to return the current mode
-    return in_parallel;
+    return (*p_state)->in_parallel;
 }
 
 void sig_comm() {
@@ -485,14 +490,14 @@ void free_path(path* head) {
     }
 }
 
-void run_builtin(char** params, char* buffer) {
+void run_builtin(char** params, char* buffer, program_state** p_state) {
     //multiple arguments vs global variables
     if (strcmp(params[0], "cd") == 0) {
         change_directory(params[1]);
     } else if (strcmp(params[0], "jobs") == 0) {
         print_processes(head_jobs);
     } else if (strcmp(params[0], "mode") == 0) {
-        in_parallel = change_mode(params[1]);
+        (*p_state)->in_parallel = change_mode(params[1], p_state);
     } else if (strcmp(params[0], "resume") == 0) {
         if (params[1] ==  NULL) {
             printf("resume takes in the process ID as an argument.\n");
@@ -523,9 +528,9 @@ void run_builtin(char** params, char* buffer) {
             printf("You cannot exit while there are processes running.\n");
         }
         else
-            do_exit = true;
+            (*p_state)->do_exit = true;
     } else {
-        if (mode == SEQUENTIAL)
+        if ((*p_state)->mode == SEQUENTIAL)
             system(buffer);
         else {
             //might need to pass in commands for this to be fully functional
