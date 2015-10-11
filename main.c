@@ -24,9 +24,10 @@
  * some inconsistent behaviour when swiching between modes ** fixed by making state a variable that is passed between functions
  */
  
- /* features to implement
+ /* still to-do
   * access command history through bangs
-  * free memory on abort
+  * free memory on ctrl +c?
+  * reduce memory consumption
   */
 
 // shell constants
@@ -37,7 +38,6 @@ static const int PARALLEL   = 1;
 typedef struct _prog_state {
     bool do_exit;
     bool in_parallel;
-    bool abort;
     int mode;
 } program_state;
 
@@ -185,11 +185,8 @@ void run_commands(char** commands, path* head, program_state** p_state) {
     for (i = 0; commands[i] != NULL; i++) {
         remove_comments(commands[i]);
         char** params = tokenify(commands[i], whitespace);
-        
-        bool abort = false;
         execute_command(params, commands[i], head, p_state); 
 		free_tokens(params);
-		if (abort) return;
 	}
 	return;
 }
@@ -214,7 +211,6 @@ void execute_command(char** params, char* command, path* head, program_state** p
             if ((*p_state)->mode == PARALLEL)
                 delete_process_by_name(command); // delete from list by name since there is not pid associated with the process
             printf("Command %s failed to run.\n", params[0]); 
-            (*p_state)->abort = true;
             (*p_state)->do_exit = true;
 		} else if (pid < 0) printf("Failed to start process.\n");
 		else {
@@ -578,7 +574,7 @@ void print_path(path* head, int num_words) {
 }
 
 path* load_environment() {
-    char path_env[1035];
+    char path_env[1024];
     FILE *fp;
     
     /* Open the command for reading. */
