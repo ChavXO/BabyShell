@@ -1,3 +1,13 @@
+/******************************************************************************\
+ * Baby Shell                                                                 *
+ *                                                                            *
+ * Author: Michael Chavinda                                                   *
+ *                                                                            *
+ * Purpose: Unix shell simulation project for my operating systems class      *
+ *                                                                            *
+ * Usage: Runs a REPL that calls commands Unix shell                          *
+\******************************************************************************/
+
 #include <stropts.h>
 #include <stdio_ext.h>
 #include <poll.h>
@@ -30,11 +40,12 @@
   * reduce memory consumption
   */
 
-// shell constants
+/*>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> Function and variable declarations <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<*/
+/* shell constants */
 static const int SEQUENTIAL = 0;
 static const int PARALLEL   = 1;
 
-// shell state as global variables (there was too much state specific information to pass around)
+/* shell state (there was too much state specific information to pass around) */
 typedef struct _prog_state {
     bool do_exit;
     bool in_parallel;
@@ -48,6 +59,7 @@ typedef struct _history {
     struct _history *next;
 } history;
 
+/* linked list for storing shell environmenr directory */
 typedef struct _path {
     char path_var [1024];
     struct _path *next;
@@ -68,7 +80,9 @@ typedef struct _processes {
 processes* head_jobs;
 bool shell_printed = false;
 
-// functions for initialising the shell
+/*_________________________________________________________*
+ *           Functions for initialising the shell          *
+ *_________________________________________________________*/
 int run_shell(path* head);
 int _inc_jobs(int n);
 void show_prompt();
@@ -79,7 +93,9 @@ path* load_path_from_list(char** environment); //helper function for load_enviro
 path *load_path(const char *filename); //load path from file
 void free_path(path* head);
 
-// functions for processing input
+/*_________________________________________________________*
+ *           Functions for parsing input                   *
+ *_________________________________________________________*/
 char** tokenify(char* buffer, char* split);
 char** splitCommands(char* buffer);
 char* is_valid_command(char* command, path* head);
@@ -87,7 +103,9 @@ void remove_comments(char* buffer);
 bool is_built_in_command(char* command);
 void run_builtin(char** params, char* buffer, program_state** p_state);
 
-// runner functions
+/*_________________________________________________________*
+ *           Functions for running shell commands          *
+ *_________________________________________________________*/
 void run_commands(char** commands, path* head, program_state** p_state);
 void execute_command(char** params, char* commands, path* head, program_state** p_state);
 char* previous_directory(char* dir);
@@ -98,9 +116,11 @@ void pause_process(char* id);
 void resume_process(char* id);
 void run_from_system(char* buffer, program_state* p_state);
 void manage_state();
-void set_process_state(pid_t pid, const char* set_state);
+void set_process_state(pid_t pid, state process_state);
 
-// clean up and debugging
+/*_________________________________________________________*
+ *           Functions cleaning up and debugging           *
+ *_________________________________________________________*/
 void print_path(path* head, int num_words); //debugging
 void list_clear(path *list);
 void clean_up_processes(); // defensive mechanism because delete is asynchronous
@@ -111,8 +131,7 @@ void delete_process(pid_t id);
 void delete_process_by_name(char* process_name);
 
 int main() {
-    // removed ampersand because the behaviour was inconsistent
-    system("reset"); //run reset in parallel to reduce lag time
+    system("reset"); //run reset in parallel to reduce lag time (removed ampersand because the behaviour was inconsistent)
     printf("%c]0;%s%c", '\033', "Shelby the Shell", '\007'); // window title
     path* head = load_environment();
     //path* head = load_path("shell-config");
@@ -121,6 +140,9 @@ int main() {
     return res;
 }
 
+/* run shell contains a loop that gets user input and then runs the appropriate file
+ * exits when user types "exit" or presses ctrl + d to signify the end of the fil
+ * The signal listener is initialised so the processes can be updated asynchronously */
 int run_shell(path* head) {
     // initialisation
     program_state* p_state = (program_state*) calloc(1, sizeof(program_state));
@@ -154,7 +176,7 @@ int run_shell(path* head) {
 void manage_state(program_state** p_state) {
     //change mode
     //if signal handler fails clean with wait
-    clean_up_processes(); // collect zombiw children if not caught by signal wait. chains of short commands had this problem
+    clean_up_processes(); // collect zombie children if not caught by signal wait. chains of short commands had this problem
     shell_printed = false;
     if ((*p_state)->in_parallel) (*p_state)->mode = PARALLEL;
     else (*p_state)->mode = SEQUENTIAL; 
@@ -168,7 +190,7 @@ void manage_state(program_state** p_state) {
 
 void clean_up_processes() {
     if (_inc_jobs(0) > 0) {
-		int pid = waitpid(-1, NULL, WNOHANG);
+		int pid = waitpid(-1, NULL, WNOHANG); //non-blocking wait
 		while (pid > 0) {	
 			printf("\nProcess %d finished running.\n", pid);
 			shell_printed = true;
@@ -191,6 +213,8 @@ void run_commands(char** commands, path* head, program_state** p_state) {
 	return;
 }
 
+/* executes $PATH commands using execv. "builtin" commands are either handled explicity
+ * or sent to the system.*/
 void execute_command(char** params, char* command, path* head, program_state** p_state) {
     if (params[0] == NULL) return;
     if (is_built_in_command(params[0])) { //handle builtin commands
@@ -468,8 +492,7 @@ path *load_path(const char *filename) {
     
     path* current = head;
     
-    //asssumes last line of file is a new line or that there is an empty space
-    char current_word[256]; //
+    char current_word[256]; // a bit large so the user can add their own directories into the path
     
     while (fgets(current_word, 256, file) != NULL) {
         int len = strlen(current_word);
@@ -521,7 +544,7 @@ void pause_process(char* id) {
         return;
     }
     if (kill(pid, SIGSTOP) == 0)
-        set_process_state(pid, "paused");
+        set_process_state(pid, PAUSED);
 }
 
 void resume_process(char* id) {
@@ -531,7 +554,7 @@ void resume_process(char* id) {
         return;
     }
     if (kill(pid, SIGCONT) == 0) {
-        set_process_state(pid, "running");
+        set_process_state(pid, RUNNING);
     }
 }
 
@@ -597,7 +620,7 @@ path* load_environment() {
     return head;
 }
 
-void set_process_state (pid_t pid, const char* set_state) {
+void set_process_state (pid_t pid, state process_state) {
     processes* current = head_jobs;
     while (current != NULL && current->id != pid) {
         current = current->next;
@@ -609,14 +632,14 @@ void set_process_state (pid_t pid, const char* set_state) {
     }
     
     processes** tmp = &current;
-    if (strcmp(set_state, "paused") == 0) {
-        printf("Job paused.\n");
+    if (process_state == PAUSED) {
+        printf("Job %d paused.\n", pid);
         (*tmp)->process_state = PAUSED;
         return;
     }
         
-    if (strcmp(set_state, "running") == 0) {
-        printf("Job resumed.\n");
+    if (process_state == RUNNING) {
+        printf("Job %d resumed.\n", pid);
         (*tmp)->process_state = RUNNING;
         return;
     }
@@ -670,6 +693,7 @@ void delete_process_by_name(char* process_name) {
         return; //case when head is empty
     }
     processes* current = head_jobs;
+    // iterate through to desired job
     while (current->next != NULL && strcmp((current->next)->prc_name, process_name) != 0) {
         current = current->next;
     }
@@ -699,7 +723,7 @@ void print_processes(processes* head) {
         if (current->process_state == PAUSED) {
             strcpy(p_state, "PAUSED");
         } else if (current->process_state == DEAD) {
-            strcpy(p_state, "DEAD");
+            strcpy(p_state, "DEAD"); // plan to keep a list of active and inactive processes
         } else {
             strcpy(p_state, "RUNNING");
         }
